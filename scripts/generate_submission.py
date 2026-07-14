@@ -107,9 +107,11 @@ for fname in tqdm(test_images, desc="Predicting"):
         continue
 
     mask = predict_mask(bgr)
+    h, w = bgr.shape[:2]
 
     # Convert binary mask → normalized polygon coordinates
-    polys = mask_to_polygons(mask, size=None, min_area=MIN_AREA)
+    # Pass (w, h) so coords are divided by actual image dimensions → [0, 1]
+    polys = mask_to_polygons(mask, size=(w, h), min_area=MIN_AREA)
 
     # Encode as JSON string in the required submission format
     # [[x1,y1],[x2,y2],...] — coordinates already normalised to [0,1]

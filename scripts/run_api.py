@@ -16,5 +16,6 @@ subprocess.run([
     "backend.main:app",
     "--host", "0.0.0.0",
     "--port", "8000",
-    "--reload",
+    "--log-level", "info",
+    # NOTE: No --reload on Windows — it breaks GPU model loading
 ], check=True)
