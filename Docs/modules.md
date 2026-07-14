@@ -753,6 +753,200 @@ Future enterprise modules may include:
 This modular architecture allows these capabilities to be integrated without restructuring the existing codebase.
 
 ---
+Store trained models.
+
+---
+
+### 10.6 Deployment Manager (Optional)
+
+Future online endpoint.
+
+---
+
+# Module 11
+# Backend API
+
+Purpose
+
+Serve predictions.
+
+Framework
+
+FastAPI
+
+Submodules
+
+---
+
+### 11.1 Upload API
+
+POST /upload
+
+---
+
+### 11.2 Predict API
+
+POST /predict
+
+---
+
+### 11.3 Health API
+
+GET /health
+
+---
+
+### 11.4 Model Loader
+
+Load trained model.
+
+---
+
+### 11.5 Response Generator
+
+Return
+
+- Polygon
+- Confidence
+- Enhanced Image
+
+---
+
+# Module 12
+# Frontend
+
+Purpose
+
+User Interface
+
+Framework
+
+Lovable
+
+Submodules
+
+---
+
+### 12.1 Upload Screen
+
+---
+
+### 12.2 Prediction Dashboard
+
+Display
+
+- Original Image
+- Mask
+- Polygon
+
+---
+
+### 12.3 Before vs After
+
+Perspective correction comparison.
+
+---
+
+### 12.4 Confidence Visualization
+
+---
+
+### 12.5 Download Results
+
+---
+
+### 12.6 Prediction History
+
+---
+
+# Module 13
+# Utilities
+
+Purpose
+
+Shared helper functions.
+
+Submodules
+
+---
+
+### 13.1 File Utilities
+
+---
+
+### 13.2 Image Utilities
+
+---
+
+### 13.3 Geometry Utilities
+
+---
+
+### 13.4 Polygon Utilities
+
+---
+
+### 13.5 Visualization Utilities
+
+---
+
+# Module Dependencies
+
+Configuration
+      │
+      ▼
+Data Management
+      │
+      ▼
+Annotation Processing
+      │
+      ▼
+Image Preprocessing
+      │
+      ▼
+Training Pipeline
+      │
+      ▼
+Validation
+      │
+      ▼
+MLflow
+      │
+      ▼
+Inference
+      │
+      ▼
+Post Processing
+      │
+      ▼
+Backend API
+      │
+      ▼
+Frontend
+
+---
+
+# Future Expansion
+
+The current system represents only the document segmentation stage.
+
+Future enterprise modules may include:
+
+- OCR Engine
+- Document Classification
+- Face Detection
+- Face Matching
+- Deepfake Detection
+- Fraud Detection
+- Identity Verification
+- Digital KYC Workflow
+- Human Review Queue
+- Audit Logging
+- Multi-document Processing
+
+This modular architecture allows these capabilities to be integrated without restructuring the existing codebase.
+
+---
 
 # 🚀 Implementation Progress Tracking
 
@@ -761,12 +955,13 @@ This modular architecture allows these capabilities to be integrated without res
 - [x] **Module 1: Project Configuration** (Completed - `src/config/settings.py`)
 - [x] **Module 2: Data Management** (Completed - `src/data/dataset.py`)
 - [x] **Module 3: Annotation Processing** (Completed - `src/data/annotations.py`)
-- [ ] **Module 4: Image Preprocessing**
-- [x] **Module 5: Training Pipeline** (Partially Completed - `src/models/unet.py`, `src/training/losses.py`)
+- [x] **Module 4: Image Preprocessing** (Completed - `src/data/transforms.py`)
+- [x] **Module 5: Training Pipeline** (Completed - `src/models/unet.py`, `src/training/losses.py`, `src/training/trainer.py`, `src/training/checkpoint.py`, `scripts/train.py`)
 - [x] **Module 6: Validation & Evaluation** (Completed - `src/evaluation/metrics.py`)
 - [x] **Module 7: Inference Engine** (Partially Completed - `src/inference/predictor.py`)
 - [x] **Module 8: Post Processing** (Partially Completed - `src/postprocessing/polygon.py`)
-- [ ] **Module 9: MLflow Integration**
+- [x] **Module 9: MLflow Integration** (Completed - embedded in `scripts/train.py`)
+- [ ] **Module 10: Submission Generator** (`scripts/generate_submission.py`)
 - [ ] **Module 11: Backend API**
 - [ ] **Module 12: Frontend**
 - [ ] **Module 13: Utilities**
