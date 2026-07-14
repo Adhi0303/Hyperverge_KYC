@@ -1,37 +1,75 @@
+"""
+src/inference/predictor.py
+===========================
+Single-image and batch inference utilities used by both the submission
+generator (scripts/generate_submission.py) and the FastAPI backend.
+"""
+
 import os
-import glob
+import warnings
+import torch
 import cv2
 import numpy as np
-import torch
+import segmentation_models_pytorch as smp
 
-from src.config.settings import DATA_ROOT, IMG_SIZE, MEAN, STD, DEVICE
+warnings.filterwarnings("ignore")
 
-def preprocess(img_rgb):
-    """Turn an RGB image into the model's input tensor: resize to IMG_SIZE,
-    scale to [0, 1], apply ImageNet Normalize, and reorder to (1, 3, H, W)."""
-    resized = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_LINEAR)
-    normalised = (resized.astype(np.float32) / 255.0 - MEAN) / STD
-    chw = normalised.transpose(2, 0, 1)                   # HWC -> CHW
-    return torch.from_numpy(chw).unsqueeze(0).float()     # add the batch axis -> 1CHW
+from src.config.settings import CKPT_ROOT, DEVICE, MEAN, STD
+
+MEAN_arr = np.array(MEAN, dtype=np.float32)
+STD_arr  = np.array(STD,  dtype=np.float32)
+IMG_SIZE  = 384   # must match training resolution
+
+
+def load_model(checkpoint: str = "best_model.pth") -> torch.nn.Module:
+    """Load the UNet++ EfficientNet-B0 model from the saved checkpoint."""
+    path = os.path.join(CKPT_ROOT, checkpoint)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Checkpoint not found at {path}. Train the model first."
+        )
+
+    model = smp.UnetPlusPlus(
+        encoder_name    = "efficientnet-b0",
+        encoder_weights = None,
+        in_channels     = 3,
+        classes         = 1,
+        activation      = None,
+    )
+    ckpt = torch.load(path, map_location=DEVICE)
+    model.load_state_dict(ckpt["model"])
+    model.eval().to(DEVICE)
+    return model
+
+
+def preprocess_image(bgr_img: np.ndarray) -> torch.Tensor:
+    """Convert a BGR OpenCV image to a normalised (1, 3, H, W) CUDA tensor."""
+    rgb     = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+    resized = cv2.resize(rgb, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_LINEAR)
+    norm    = (resized.astype(np.float32) / 255.0 - MEAN_arr) / STD_arr
+    tensor  = torch.from_numpy(norm.transpose(2, 0, 1)).unsqueeze(0).to(DEVICE)
+    return tensor
 
 
 @torch.no_grad()
-def save_test_predictions(model, pred_dir, thresh=0.5):
-    """Run the model over every test image and save one binary mask PNG per image
-    (IMG_SIZE, values {0, 255}) into `pred_dir` - the standard format test.py
-    reads. Returns the number of images written."""
-    os.makedirs(pred_dir, exist_ok=True)
-    model.eval().to(DEVICE)
+def predict_single(model: torch.nn.Module,
+                   bgr_img: np.ndarray,
+                   thresh: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Run inference on a single BGR image.
 
-    image_paths = sorted(glob.glob(os.path.join(DATA_ROOT, "images", "test", "*.jpg")))
-    for image_path in image_paths:
-        image = cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
+    Returns
+    -------
+    mask : uint8 ndarray at the ORIGINAL image resolution (values 0 or 1)
+    prob : float32 probability map at original resolution
+    """
+    h, w = bgr_img.shape[:2]
+    tensor = preprocess_image(bgr_img)
 
-        x = preprocess(image).to(DEVICE)
-        prob = torch.sigmoid(model(x))[0, 0].cpu().numpy()
-        mask = (prob > thresh).astype(np.uint8) * 255     # {0,1} -> {0,255} for a viewable PNG
+    with torch.amp.autocast(device_type="cuda", enabled=(DEVICE == "cuda")):
+        logits = model(tensor)
 
-        stem = os.path.splitext(os.path.basename(image_path))[0]
-        cv2.imwrite(os.path.join(pred_dir, stem + ".png"), mask)
-
-    return len(image_paths)
+    prob_small = torch.sigmoid(logits)[0, 0].cpu().numpy()
+    prob = cv2.resize(prob_small, (w, h), interpolation=cv2.INTER_LINEAR)
+    mask = (prob > thresh).astype(np.uint8)
+    return mask, prob

@@ -24,6 +24,7 @@ import { PipelineVisualization, DEFAULT_STEPS } from "@/components/pipeline-visu
 import { QualityGauge } from "@/components/quality-gauge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { predictFile, type PredictionResult } from "@/lib/api";
 
 export const Route = createFileRoute("/analysis")({
   head: () => ({
@@ -45,6 +46,7 @@ function Analysis() {
   const [step, setStep] = useState(-1);
   const [logsOpen, setLogsOpen] = useState(true);
   const [logs, setLogs] = useState<{ t: string; msg: string }[]>([]);
+  const [result, setResult] = useState<PredictionResult | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -54,6 +56,7 @@ function Analysis() {
     setProgress(0);
     setStep(-1);
     setLogs([]);
+    setResult(null);
   };
 
   const pushLog = (msg: string) =>
@@ -69,28 +72,38 @@ function Analysis() {
     setPhase("uploading");
     setProgress(0);
     setLogs([]);
+    setResult(null);
     pushLog(`Image loaded: ${f.name} (${(f.size / 1024).toFixed(0)} KB)`);
 
-    // simulated upload
-    for (let p = 0; p <= 100; p += 10) {
-      await new Promise((r) => setTimeout(r, 60));
+    // Animate upload progress bar
+    for (let p = 0; p <= 60; p += 10) {
+      await new Promise((r) => setTimeout(r, 50));
       setProgress(p);
     }
-    setPhase("processing");
-    pushLog("Inference started · seg-unet-v2.4.1");
 
-    for (let i = 0; i < DEFAULT_STEPS.length; i++) {
-      setStep(i);
-      await new Promise((r) => setTimeout(r, 380));
-      if (i === 2) pushLog("Mask generated · 512×512");
-      if (i === 3) pushLog("Polygon created · 4 vertices");
-      if (i === 4) pushLog("Perspective corrected · homography estimated");
-      if (i === 5) pushLog("Quality assessment complete");
+    setPhase("processing");
+    pushLog("Sending to HyperVision API · UNet++ EfficientNet-B0");
+    setStep(0);
+
+    const t0 = performance.now();
+    try {
+      const res = await predictFile(f);
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+      setResult(res);
+      setProgress(100);
+      setStep(DEFAULT_STEPS.length);
+      setPhase("done");
+      pushLog(`Mask generated · ${res.has_document ? "document detected" : "no document"}`);
+      pushLog(`Polygon: ${res.polygon.length} vertices`);
+      pushLog(`Confidence: ${(res.confidence * 100).toFixed(1)}%`);
+      pushLog(`Device: ${res.device}`);
+      pushLog(`Pipeline completed in ${elapsed}s`);
+      toast.success(res.has_document ? "Document segmented successfully!" : "No document detected in image.");
+    } catch (err: any) {
+      setPhase("idle");
+      pushLog(`ERROR: ${err.message}`);
+      toast.error(`API error: ${err.message}`);
     }
-    setStep(DEFAULT_STEPS.length);
-    setPhase("done");
-    pushLog("Pipeline completed in 412ms");
-    toast.success("Document processed successfully");
   }, []);
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
