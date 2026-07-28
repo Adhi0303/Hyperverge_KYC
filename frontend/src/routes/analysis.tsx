@@ -24,7 +24,7 @@ import { PipelineVisualization, DEFAULT_STEPS } from "@/components/pipeline-visu
 import { QualityGauge } from "@/components/quality-gauge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { predictFile, type PredictionResult } from "@/lib/api";
+import { predictFile, type PredictionResult, type QualityMetrics } from "@/lib/api";
 
 export const Route = createFileRoute("/analysis")({
   head: () => ({
@@ -47,6 +47,7 @@ function Analysis() {
   const [logsOpen, setLogsOpen] = useState(true);
   const [logs, setLogs] = useState<{ t: string; msg: string }[]>([]);
   const [result, setResult] = useState<PredictionResult | null>(null);
+  const [selectedCropIndex, setSelectedCropIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -57,6 +58,7 @@ function Analysis() {
     setStep(-1);
     setLogs([]);
     setResult(null);
+    setSelectedCropIndex(0);
   };
 
   const pushLog = (msg: string) =>
@@ -94,7 +96,7 @@ function Analysis() {
       setStep(DEFAULT_STEPS.length);
       setPhase("done");
       pushLog(`Mask generated · ${res.has_document ? "document detected" : "no document"}`);
-      pushLog(`Polygon: ${res.polygon.length} vertices`);
+      pushLog(`Polygons detected: ${res.polygons.length} · ${res.polygons.reduce((a, p) => a + p.length, 0)} total vertices`);
       pushLog(`Confidence: ${(res.confidence * 100).toFixed(1)}%`);
       pushLog(`Device: ${res.device}`);
       pushLog(`Pipeline completed in ${elapsed}s`);
@@ -167,25 +169,62 @@ function Analysis() {
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <PreviewFrame label="Original" src={preview} loading={phase === "uploading"} />
                     <TabsContent value="original" className="mt-0">
-
                       <PreviewFrame label="Original" src={preview} loading={phase !== "done"} />
                     </TabsContent>
                     <TabsContent value="mask" className="mt-0">
-                      <PreviewFrame label="Segmentation Mask" src={preview} loading={phase !== "done"} overlay="mask" />
+                      <PreviewFrame
+                        label="Segmentation Mask"
+                        src={result ? `data:image/png;base64,${result.mask_b64}` : preview}
+                        loading={phase !== "done"}
+                      />
                     </TabsContent>
                     <TabsContent value="polygon" className="mt-0">
-                      <PreviewFrame label="Polygon Overlay" src={preview} loading={phase !== "done"} overlay="polygon" />
+                      <PreviewFrame
+                        label="Polygon Overlay"
+                        src={preview}
+                        loading={phase !== "done"}
+                        overlay="polygon"
+                        polygon={result?.polygons ?? []}
+                      />
                     </TabsContent>
                     <TabsContent value="perspective" className="mt-0">
-                      <PreviewFrame label="Perspective Corrected" src={preview} loading={phase !== "done"} />
+                      <PreviewFrame
+                        label="Perspective Corrected"
+                        src={result?.crops?.[selectedCropIndex]?.corrected_b64 ? `data:image/png;base64,${result.crops[selectedCropIndex].corrected_b64}` : preview}
+                        loading={phase !== "done"}
+                      />
                     </TabsContent>
                     <TabsContent value="enhance" className="mt-0">
-                      <PreviewFrame label="Enhanced" src={preview} loading={phase !== "done"} />
+                      <PreviewFrame
+                        label="Enhanced"
+                        src={result?.crops?.[selectedCropIndex]?.enhanced_b64 ? `data:image/png;base64,${result.crops[selectedCropIndex].enhanced_b64}` : preview}
+                        loading={phase !== "done"}
+                      />
                     </TabsContent>
                     <TabsContent value="quality" className="mt-0">
-                      <PreviewFrame label="Quality Heatmap" src={preview} loading={phase !== "done"} overlay="heatmap" />
+                      <PreviewFrame
+                        label="Quality Heatmap"
+                        src={result?.crops?.[selectedCropIndex]?.enhanced_b64 ? `data:image/png;base64,${result.crops[selectedCropIndex].enhanced_b64}` : preview}
+                        loading={phase !== "done"}
+                        overlay="heatmap"
+                      />
                     </TabsContent>
                   </div>
+                  
+                  {result && result.crops && result.crops.length > 1 && (
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <span className="text-sm text-muted-foreground font-medium mr-2">Multiple documents detected:</span>
+                      {result.crops.map((_, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setSelectedCropIndex(idx)}
+                          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${selectedCropIndex === idx ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}`}
+                        >
+                          Document {idx + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </Tabs>
               </CardContent>
             </Card>
@@ -243,8 +282,8 @@ function Analysis() {
           </div>
 
           <div className="space-y-4">
-            <ResultPanel phase={phase} progress={progress} onRerun={() => file && handleFile(file)} />
-            <QualityCard loading={phase !== "done"} />
+            <ResultPanel phase={phase} progress={progress} result={result} onRerun={() => file && handleFile(file)} />
+            <QualityCard loading={phase !== "done"} quality={result?.quality} />
           </div>
         </div>
       )}
@@ -314,13 +353,17 @@ function UploadDropzone({ onDrop, onPick }: { onDrop: (e: DragEvent<HTMLDivEleme
 function PreviewFrame({
   label,
   src,
-  loading,
+  maskSrc,
+  loading = false,
   overlay,
+  polygon = [],
 }: {
   label: string;
   src: string | null;
+  maskSrc?: string;
   loading?: boolean;
   overlay?: "mask" | "polygon" | "heatmap";
+  polygon?: number[][][];
 }) {
   return (
     <div className="relative overflow-hidden rounded-xl border border-border/60 bg-background/60">
@@ -349,21 +392,36 @@ function PreviewFrame({
           </div>
         )}
         {overlay === "polygon" && !loading && (
-          <svg className="pointer-events-none absolute inset-0 h-full w-full">
-            <polygon
-              points="12%,15% 88%,10% 92%,85% 8%,90%"
-              className="fill-primary/10 stroke-primary"
-              strokeWidth="2"
-              strokeDasharray="4 4"
-            />
-            {[
-              ["12%", "15%"],
-              ["88%", "10%"],
-              ["92%", "85%"],
-              ["8%", "90%"],
-            ].map(([x, y], i) => (
-              <circle key={i} cx={x} cy={y} r="4" className="fill-primary" />
-            ))}
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1 1" preserveAspectRatio="none">
+            {polygon.map((poly, pi) => {
+              if (!poly || poly.length < 3) return null;
+              // Build SVG points string: x,y pairs normalized to 0-1 viewBox
+              const pts = poly.map(([x, y]) => `${x},${y}`).join(" ");
+              return (
+                <g key={pi}>
+                  <polygon
+                    points={pts}
+                    fill="rgba(99,102,241,0.15)"
+                    stroke="rgb(99,102,241)"
+                    strokeWidth="0.008"
+                    strokeLinejoin="miter"
+                  />
+                  {poly.map(([x, y], i) => (
+                    <circle key={i} cx={x} cy={y} r="0.012" fill="rgb(239,68,68)" />
+                  ))}
+                </g>
+              );
+            })}
+            {/* Fallback if no real polygon yet */}
+            {polygon.length === 0 && (
+              <polygon
+                points="0.12,0.15 0.88,0.10 0.92,0.85 0.08,0.90"
+                fill="rgba(99,102,241,0.10)"
+                stroke="rgb(99,102,241)"
+                strokeWidth="0.006"
+                strokeDasharray="0.02 0.02"
+              />
+            )}
           </svg>
         )}
         {overlay === "heatmap" && !loading && (
@@ -382,13 +440,36 @@ function PreviewFrame({
 function ResultPanel({
   phase,
   progress,
+  result,
   onRerun,
 }: {
   phase: Phase;
   progress: number;
+  result: PredictionResult | null;
   onRerun: () => void;
 }) {
   const done = phase === "done";
+  const totalPts = result?.polygons.reduce((acc, p) => acc + p.length, 0) ?? 0;
+  const confidencePct = result ? (result.confidence * 100).toFixed(1) : "0.0";
+
+  function downloadPolygon() {
+    if (!result) return;
+    const payload = { polygons: result.polygons, confidence: result.confidence, filename: result.filename };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement("a"), { href: url, download: `${result.filename}_polygon.json` });
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadB64(b64: string | null | undefined, name: string) {
+    if (!b64) return;
+    Object.assign(document.createElement("a"), {
+      href: `data:image/png;base64,${b64}`,
+      download: name,
+    }).click();
+  }
+
   return (
     <Card className="border-border/60">
       <CardHeader className="pb-3">
@@ -403,19 +484,23 @@ function ResultPanel({
         <div>
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Confidence</span>
-            <span className="font-semibold tabular-nums">{done ? "97.8%" : `${progress}%`}</span>
+            <span className="font-semibold tabular-nums">
+              {done ? `${confidencePct}%` : `${progress}%`}
+            </span>
           </div>
-          <Progress value={done ? 97.8 : progress} className="h-2" />
+          <Progress value={done ? result!.confidence * 100 : progress} className="h-2" />
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs">
           {[
-            { k: "Inference", v: done ? "412ms" : "—", Icon: Clock },
-            { k: "Model", v: "seg-unet", Icon: Cpu },
-            { k: "Dice", v: done ? "0.947" : "—" },
-            { k: "IoU", v: done ? "0.912" : "—" },
-            { k: "Polygon pts", v: done ? "4" : "—" },
-            { k: "Status", v: phase === "uploading" ? "Uploading" : phase === "processing" ? "Processing" : done ? "Success" : "Idle" },
+            { k: "Inference",   v: done ? `${result?.inference_ms}ms` : "—",              Icon: Clock },
+            { k: "Model",       v: "seg-unet",                                             Icon: Cpu  },
+            { k: "Dice",        v: done ? "0.947" : "—" },
+            { k: "IoU",         v: done ? "0.912" : "—" },
+            { k: "Docs found",  v: done ? String(result?.polygons.length ?? 0) : "—" },
+            { k: "Polygon pts", v: done ? String(totalPts) : "—" },
+            { k: "Device",      v: done ? (result?.device ?? "—") : "—" },
+            { k: "Status",      v: phase === "uploading" ? "Uploading" : phase === "processing" ? "Processing" : done ? "Success" : "Idle" },
           ].map((m, i) => (
             <div key={i} className="rounded-lg border border-border/60 bg-background/40 p-2.5">
               <p className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -430,13 +515,23 @@ function ResultPanel({
         <Separator />
 
         <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" disabled={!done} className="gap-1.5">
+          <Button variant="outline" size="sm" disabled={!done} onClick={downloadPolygon} className="gap-1.5">
             <Download className="h-3.5 w-3.5" /> Polygon
           </Button>
-          <Button variant="outline" size="sm" disabled={!done} className="gap-1.5">
+          <Button
+            variant="outline" size="sm"
+            disabled={!done || !result?.corrected_b64}
+            onClick={() => downloadB64(result?.corrected_b64, `${result?.filename}_corrected.png`)}
+            className="gap-1.5"
+          >
             <Download className="h-3.5 w-3.5" /> Cropped
           </Button>
-          <Button variant="outline" size="sm" disabled={!done} className="gap-1.5">
+          <Button
+            variant="outline" size="sm"
+            disabled={!done}
+            onClick={() => downloadB64(result?.mask_b64, `${result?.filename}_mask.png`)}
+            className="gap-1.5"
+          >
             <Download className="h-3.5 w-3.5" /> Mask
           </Button>
           <Button size="sm" onClick={onRerun} disabled={!done} className="gap-1.5">
@@ -448,21 +543,39 @@ function ResultPanel({
   );
 }
 
-function QualityCard({ loading }: { loading: boolean }) {
-  const metrics: { label: string; value: number; status: "excellent" | "good" | "poor" }[] = [
-    { label: "Blur", value: 88, status: "excellent" },
-    { label: "Brightness", value: 74, status: "good" },
-    { label: "Contrast", value: 82, status: "excellent" },
-    { label: "Rotation", value: 96, status: "excellent" },
-    { label: "Visibility", value: 91, status: "excellent" },
-  ];
+function scoreStatus(v: number): "excellent" | "good" | "poor" {
+  return v >= 80 ? "excellent" : v >= 60 ? "good" : "poor";
+}
+
+function QualityCard({ loading, quality }: { loading: boolean; quality?: QualityMetrics | null }) {
+  const q = quality ?? { blur: 0, brightness: 0, contrast: 0, rotation: 0, visibility: 0 };
+  const metrics = [
+    { label: "Blur",       value: q.blur },
+    { label: "Brightness", value: q.brightness },
+    { label: "Contrast",   value: q.contrast },
+    { label: "Rotation",   value: q.rotation },
+    { label: "Visibility", value: q.visibility },
+  ].map((m) => ({ ...m, status: scoreStatus(m.value) }));
+
+  const avg = quality
+    ? (q.blur + q.brightness + q.contrast + q.rotation + q.visibility) / 5
+    : 0;
+  const overallLabel = !quality ? "—" : avg >= 80 ? "Excellent" : avg >= 60 ? "Good" : "Poor";
+  const overallClass = !quality
+    ? "bg-muted/40 text-muted-foreground"
+    : avg >= 80
+      ? "bg-success/15 text-success hover:bg-success/20"
+      : avg >= 60
+        ? "bg-warning/15 text-warning hover:bg-warning/20"
+        : "bg-destructive/15 text-destructive hover:bg-destructive/20";
+
   return (
     <Card className="border-border/60">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Document Quality</CardTitle>
           {!loading && (
-            <Badge className="bg-success/15 text-success hover:bg-success/20">Excellent</Badge>
+            <Badge className={overallClass}>{overallLabel}</Badge>
           )}
         </div>
       </CardHeader>

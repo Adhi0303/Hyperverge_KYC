@@ -15,7 +15,7 @@ OUT_DIR = os.path.join(PRED_ROOT, "visual_check")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 df = pd.read_csv(os.path.join(PRED_ROOT, "pred.csv"))
-sample = df.sample(5, random_state=42)
+sample = df.sample(20, random_state=7)
 
 for _, row in sample.iterrows():
     fname  = row["image"]

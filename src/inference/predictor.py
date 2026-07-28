@@ -70,6 +70,7 @@ def predict_single(model: torch.nn.Module,
         logits = model(tensor)
 
     prob_small = torch.sigmoid(logits)[0, 0].cpu().numpy()
+    prob_small = np.ascontiguousarray(prob_small, dtype=np.float32)  # fix OpenCV 5 resize assert
     prob = cv2.resize(prob_small, (w, h), interpolation=cv2.INTER_LINEAR)
     mask = (prob > thresh).astype(np.uint8)
     return mask, prob
